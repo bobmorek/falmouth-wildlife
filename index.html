@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Falmouth Bay Wildlife Log</title>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Outfit:wght@300;400;500;600;700&display=swap');
+  :root{
+    --abyss:#04122e; --deep:#08145C; --mid:#1f5fa8; --surf:#69C0E2;
+    --foam:#d8f0fb; --coral:#e8743b; --kelp:#2f6d54; --ink:#06101f; --paper:#fbf8f2;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:'Outfit',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    background:var(--abyss);color:var(--paper);overflow:hidden}
+
+  .app{display:flex;height:100vh;width:100vw}
+  .panel{width:380px;min-width:380px;height:100%;
+    background:linear-gradient(170deg,var(--deep) 0%,var(--abyss) 100%);
+    border-right:1px solid rgba(105,192,226,.25);display:flex;flex-direction:column;
+    box-shadow:8px 0 40px rgba(0,0,0,.4);z-index:1000;position:relative}
+  #map{flex:1;height:100%;background:var(--abyss)}
+
+  .brand{padding:22px 24px 18px;border-bottom:1px solid rgba(105,192,226,.18)}
+  .brand h1{font-family:'Fraunces',serif;font-weight:900;font-size:25px;line-height:1.05;letter-spacing:-.5px}
+  .brand h1 span{color:var(--surf)}
+  .brand p{font-size:12.5px;opacity:.65;margin-top:5px;font-weight:300;letter-spacing:.3px}
+
+  .scroll{flex:1;overflow-y:auto;padding:20px 24px 28px}
+  .scroll::-webkit-scrollbar{width:8px}
+  .scroll::-webkit-scrollbar-thumb{background:rgba(105,192,226,.3);border-radius:4px}
+
+  label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:1.2px;
+    opacity:.7;margin:16px 0 7px;font-weight:600}
+  label:first-child{margin-top:0}
+
+  input,select,textarea{width:100%;background:rgba(255,255,255,.06);
+    border:1px solid rgba(105,192,226,.25);color:var(--paper);padding:11px 13px;
+    border-radius:9px;font-size:14px;font-family:inherit;transition:border-color .15s,background .15s}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--surf);background:rgba(255,255,255,.1)}
+  select option{background:var(--deep);color:var(--paper)}
+  textarea{resize:vertical;min-height:58px}
+
+  /* category tiles */
+  .cat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+  .cat{background:rgba(255,255,255,.05);border:1px solid rgba(105,192,226,.2);
+    border-radius:12px;padding:13px 10px;text-align:center;cursor:pointer;
+    transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:7px}
+  .cat:hover{background:rgba(105,192,226,.13);transform:translateY(-2px)}
+  .cat.active{background:var(--surf);color:var(--ink);border-color:var(--surf);
+    box-shadow:0 8px 20px rgba(105,192,226,.35)}
+  .cat svg{width:38px;height:38px;stroke:var(--surf);fill:none;stroke-width:1.6;
+    stroke-linecap:round;stroke-linejoin:round;transition:stroke .15s}
+  .cat.active svg{stroke:var(--ink)}
+  .cat span{font-size:12px;font-weight:600;letter-spacing:.2px}
+
+  /* species list (revealed after category) */
+  .sp-wrap{margin-top:10px}
+  .sp-row{display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:9px;
+    background:rgba(255,255,255,.04);border:1px solid rgba(105,192,226,.15);
+    cursor:pointer;margin-bottom:6px;transition:all .13s}
+  .sp-row:hover{background:rgba(105,192,226,.13)}
+  .sp-row.active{background:rgba(105,192,226,.22);border-color:var(--surf)}
+  .sp-row svg{width:26px;height:26px;flex:none;stroke:var(--surf);fill:none;
+    stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+  .sp-row .thumb{width:40px;height:40px;flex:none;border-radius:8px;object-fit:cover;
+    background:rgba(105,192,226,.1)}
+  .sp-row .thumb-svg{width:40px;height:40px;flex:none;display:flex;align-items:center;
+    justify-content:center;background:rgba(105,192,226,.1);border-radius:8px}
+  .sp-row .thumb-svg svg{width:26px;height:26px}
+  .sp-row .nm{font-size:13.5px;font-weight:500}
+  .sp-row .ltn{font-size:11px;opacity:.5;font-style:italic;margin-left:auto;font-weight:300}
+  .back{font-size:12px;color:var(--surf);cursor:pointer;display:inline-flex;
+    align-items:center;gap:5px;margin-bottom:10px;opacity:.85;font-weight:500}
+  .back:hover{opacity:1}
+
+  .hint{font-size:11.5px;opacity:.55;margin-top:6px;font-weight:300;line-height:1.4}
+  .pickbtn{width:100%;margin-top:8px;background:rgba(105,192,226,.12);
+    border:1px dashed rgba(105,192,226,.5);color:var(--surf);padding:11px;
+    border-radius:9px;cursor:pointer;font-size:13px;font-weight:500;font-family:inherit;transition:all .15s}
+  .pickbtn:hover{background:rgba(105,192,226,.2)}
+  .pickbtn.armed{background:var(--coral);color:#fff;border-style:solid;border-color:var(--coral)}
+  .coords{font-size:12px;opacity:.8;margin-top:7px;font-family:ui-monospace,monospace}
+
+  .wx{margin-top:8px;background:rgba(255,255,255,.05);border-radius:10px;padding:12px 14px;
+    font-size:12.5px;border:1px solid rgba(105,192,226,.15)}
+  .wx .row{display:flex;justify-content:space-between;padding:3px 0;opacity:.85}
+  .wx .row b{font-weight:600;opacity:1}
+  .wx .ttl{font-weight:600;color:var(--surf);margin-bottom:6px;font-size:11px;
+    text-transform:uppercase;letter-spacing:1px}
+
+  .submit{width:100%;margin-top:22px;background:linear-gradient(100deg,var(--coral),#f0954e);
+    color:#fff;border:none;padding:15px;border-radius:11px;font-size:15px;font-weight:700;
+    cursor:pointer;font-family:inherit;letter-spacing:.3px;transition:transform .12s,box-shadow .2s;
+    box-shadow:0 8px 22px rgba(232,116,59,.35)}
+  .submit:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(232,116,59,.45)}
+  .submit:disabled{opacity:.5;cursor:not-allowed;transform:none}
+
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(120%);
+    background:var(--kelp);color:#fff;padding:13px 26px;border-radius:30px;font-size:14px;
+    font-weight:600;z-index:3000;transition:transform .35s cubic-bezier(.2,1,.3,1);
+    box-shadow:0 10px 30px rgba(0,0,0,.4)}
+  .toast.show{transform:translateX(-50%) translateY(0)}
+  .toast.err{background:var(--coral)}
+
+  .stats{padding:14px 24px;border-top:1px solid rgba(105,192,226,.18);display:flex;gap:18px;font-size:12px}
+  .stats div{opacity:.8}
+  .stats b{font-family:'Fraunces',serif;font-size:20px;display:block;color:var(--surf);font-weight:600;line-height:1}
+
+  .setup{position:fixed;inset:0;background:rgba(4,18,46,.97);z-index:5000;display:none;
+    align-items:center;justify-content:center;padding:24px}
+  .setup .card{max-width:560px;background:var(--deep);border-radius:18px;padding:32px;
+    border:1px solid rgba(105,192,226,.3);max-height:90vh;overflow-y:auto}
+  .setup h2{font-family:'Fraunces',serif;font-size:24px;margin-bottom:8px}
+  .setup p{font-size:13.5px;opacity:.8;line-height:1.6;margin-bottom:12px}
+  .setup code{background:rgba(0,0,0,.35);padding:2px 7px;border-radius:5px;font-size:12px;color:var(--surf)}
+  .setup .go{margin-top:16px;background:var(--surf);color:var(--ink);border:none;padding:13px;
+    border-radius:10px;font-weight:700;width:100%;cursor:pointer;font-size:14px}
+
+  .leaflet-popup-content-wrapper{background:var(--deep);color:var(--paper);border-radius:12px}
+  .leaflet-popup-tip{background:var(--deep)}
+  .leaflet-popup-content{margin:13px 16px;font-family:'Outfit',sans-serif}
+  .pop .sp-name{font-family:'Fraunces',serif;font-size:16px;font-weight:600;color:var(--surf);
+    display:flex;align-items:center;gap:7px}
+  .pop .sp-name svg{width:22px;height:22px;stroke:var(--surf);fill:none;stroke-width:1.6;
+    stroke-linecap:round;stroke-linejoin:round}
+  .pop .meta{font-size:12px;opacity:.8;margin-top:5px;line-height:1.5}
+  .pop .note{font-size:12.5px;margin-top:6px;font-style:italic;opacity:.9}
+  .marker-ico svg{width:30px;height:30px;stroke:#fff;fill:rgba(8,20,92,.55);stroke-width:1.5;
+    stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 2px 4px rgba(0,0,0,.7))}
+
+  @media(max-width:760px){
+    .app{flex-direction:column-reverse}
+    .panel{width:100%;min-width:0;height:auto;max-height:62vh;border-right:none;
+      border-top:1px solid rgba(105,192,226,.25)}
+    #map{height:38vh;min-height:240px}
+  }
+</style>
+</head>
+<body>
+
+<div class="setup" id="setup">
+  <div class="card">
+    <h2>Connect your database</h2>
+    <p>Paste your <b>Supabase</b> project values to start logging. Full steps are in the README.</p>
+    <label style="font-size:11px;text-transform:uppercase;letter-spacing:1px;opacity:.7">Project URL</label>
+    <input id="su-url" placeholder="https://xxxxx.supabase.co" />
+    <label style="font-size:11px;text-transform:uppercase;letter-spacing:1px;opacity:.7;margin-top:12px;display:block">Anon / publishable key</label>
+    <input id="su-key" placeholder="sb_publishable_… or eyJ…" />
+    <button class="go" onclick="saveKeys()">Connect</button>
+  </div>
+</div>
+
+<div class="app">
+  <aside class="panel">
+    <div class="brand">
+      <h1>Falmouth Bay<br><span>Wildlife Log</span></h1>
+      <p>Citizen records of life in the bay</p>
+    </div>
+
+    <div class="scroll">
+      <label>What did you see?</label>
+      <div id="picker"></div>
+
+      <label>Count (approx.)</label>
+      <input type="number" id="count" min="1" value="1" />
+
+      <label>Location</label>
+      <button class="pickbtn" id="pickbtn" onclick="armPick()">Tap map to drop a pin</button>
+      <div class="coords" id="coords">No location set</div>
+      <button class="pickbtn" style="margin-top:7px" onclick="useMyLocation()">Use my current location</button>
+
+      <label>Weather at sighting</label>
+      <div class="wx" id="wx"><div class="row" style="opacity:.6">Set a location to auto-fetch conditions…</div></div>
+
+      <label>Notes (optional)</label>
+      <textarea id="notes" placeholder="Behaviour, direction of travel, sea state, distinguishing marks…"></textarea>
+
+      <label>Observer name (optional)</label>
+      <input id="observer" placeholder="e.g. Bob C." />
+
+      <button class="submit" id="submit" onclick="submitSighting()">Log sighting</button>
+    </div>
+
+    <div class="stats">
+      <div><b id="stat-total">0</b>sightings</div>
+      <div><b id="stat-species">0</b>species</div>
+      <div><b id="stat-yours">0</b>logged here</div>
+    </div>
+  </aside>
+  <div id="map"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   CONFIG — Supabase project values
+   ============================================================ */
+const CONFIG = {
+  SUPABASE_URL: "https://ciwgwdrnjvcwdelxnohn.supabase.co",
+  SUPABASE_KEY: "sb_publishable_QaupbqY9eSnM5KGarmb0uA_ZZpPYJMV"
+};
+/* ============================================================ */
+
+/* ---- hand-drawn line icons (single path family, consistent weight) ---- */
+const ICON = {
+  dolphin:`<svg viewBox="0 0 32 32"><path d="M3 19c5 1 8-2 11-7 2-3 5-5 9-5 3 0 5 2 5 2-2 1-3 2-3 4 0 4-3 9-9 10-5 1-9-1-11-3"/><path d="M14 12c-2-3-1-6 1-8 0 3 1 4 3 5"/><path d="M9 19c-2 1-4 1-6 0"/></svg>`,
+  whale:`<svg viewBox="0 0 32 32"><path d="M3 17c0 5 5 8 11 8s12-4 12-10c0-2-1-4-3-4-1 0-2 1-2 2 0 0-3-1-7-1-6 0-11 2-11 5z"/><path d="M26 11c1-2 3-3 3-3 0 2-1 3-1 3"/><path d="M8 17c-1 1-3 1-4 0"/></svg>`,
+  porpoise:`<svg viewBox="0 0 32 32"><path d="M4 18c4 1 7-1 10-5 2-3 5-4 8-4 2 0 4 1 4 1-1 1-2 2-2 3 0 4-4 8-9 8-5 0-9-2-11-3"/><path d="M15 13c-1-2 0-4 1-5 0 2 1 3 2 4"/></svg>`,
+  seabird:`<svg viewBox="0 0 32 32"><path d="M3 14c4-4 7-4 10 0 3-4 6-4 10 0"/><path d="M13 14c0 4 1 8 3 10 2-2 3-6 3-10"/></svg>`,
+  seal:`<svg viewBox="0 0 32 32"><path d="M6 22c0-6 4-11 10-11 5 0 8 3 9 6 1 2 3 2 3 2-1 2-3 2-4 1"/><path d="M25 17c1-1 3-1 3-1"/><circle cx="22" cy="16" r="1"/><path d="M6 22c-1 2-2 3-3 3 1-2 1-3 1-3"/></svg>`,
+  shark:`<svg viewBox="0 0 32 32"><path d="M2 19c6 0 9-2 13-7 2 4 5 6 9 6-1 2-4 4-9 4-6 0-11-1-13-3z"/><path d="M15 12c1-4 3-7 3-7 1 3 1 6 0 8"/><path d="M11 20l-2 4 4-2"/></svg>`,
+  sunfish:`<svg viewBox="0 0 32 32"><path d="M9 16c0-5 3-8 7-8s7 3 7 8-3 8-7 8c-2 0-4-1-5-2"/><path d="M16 8c1-3 1-5 1-5M16 24c1 3 1 5 1 5M9 16H4"/><circle cx="13" cy="14" r="1"/></svg>`,
+  turtle:`<svg viewBox="0 0 32 32"><path d="M10 18c0-4 3-7 6-7s6 3 6 7-3 6-6 6-6-2-6-6z"/><path d="M16 11V8M22 16h3M10 16H7M14 23l-1 3M19 23l1 3"/><path d="M13 16l3-2 3 2-1 3h-4z"/></svg>`,
+  jelly:`<svg viewBox="0 0 32 32"><path d="M8 15c0-5 4-8 8-8s8 3 8 8c0 1-1 2-2 2H10c-1 0-2-1-2-2z"/><path d="M11 17c0 4-1 7-2 9M16 17v10M21 17c0 4 1 7 2 9"/></svg>`,
+  other:`<svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="11"/><path d="M13 13c0-2 1.5-3 3-3s3 1 3 3-1.5 2.5-3 3v2"/><circle cx="16" cy="22" r=".6"/></svg>`
+};
+
+/* ---- categories → species (Cornish / SW England waters) ---- */
+const CATEGORIES = [
+  {k:'dolphins', n:'Dolphins & porpoise', icon:'dolphin', species:[
+    {k:'common_dolphin',     n:'Common dolphin',          ltn:'Delphinus delphis',   icon:'dolphin'},
+    {k:'bottlenose_dolphin', n:'Bottlenose dolphin',      ltn:'Tursiops truncatus',  icon:'dolphin'},
+    {k:'rissos_dolphin',     n:"Risso's dolphin",         ltn:'Grampus griseus',     icon:'dolphin'},
+    {k:'striped_dolphin',    n:'Striped dolphin',         ltn:'Stenella coeruleoalba',icon:'dolphin'},
+    {k:'white_sided_dolphin',n:'Atlantic white-sided dolphin',ltn:'Lagenorhynchus acutus',icon:'dolphin'},
+    {k:'harbour_porpoise',   n:'Harbour porpoise',        ltn:'Phocoena phocoena',   icon:'porpoise'},
+  ]},
+  {k:'whales', n:'Whales', icon:'whale', species:[
+    {k:'minke_whale',   n:'Minke whale',   ltn:'Balaenoptera acutorostrata', icon:'whale'},
+    {k:'humpback_whale',n:'Humpback whale',ltn:'Megaptera novaeangliae',     icon:'whale'},
+    {k:'fin_whale',     n:'Fin whale',     ltn:'Balaenoptera physalus',      icon:'whale'},
+    {k:'pilot_whale',   n:'Long-finned pilot whale',ltn:'Globicephala melas',icon:'whale'},
+    {k:'orca',          n:'Orca (killer whale)',ltn:'Orcinus orca',          icon:'whale'},
+  ]},
+  {k:'seabirds', n:'Seabirds', icon:'seabird', species:[
+    {k:'gannet',     n:'Northern gannet', ltn:'Morus bassanus',         icon:'seabird'},
+    {k:'shag',       n:'European shag',   ltn:'Gulosus aristotelis',    icon:'seabird'},
+    {k:'cormorant',  n:'Cormorant',       ltn:'Phalacrocorax carbo',    icon:'seabird'},
+    {k:'fulmar',     n:'Fulmar',          ltn:'Fulmarus glacialis',     icon:'seabird'},
+    {k:'kittiwake',  n:'Kittiwake',       ltn:'Rissa tridactyla',       icon:'seabird'},
+    {k:'razorbill',  n:'Razorbill',       ltn:'Alca torda',             icon:'seabird'},
+    {k:'guillemot',  n:'Guillemot',       ltn:'Uria aalge',             icon:'seabird'},
+    {k:'puffin',     n:'Puffin',          ltn:'Fratercula arctica',     icon:'seabird'},
+    {k:'manx_shearwater',n:'Manx shearwater',ltn:'Puffinus puffinus',  icon:'seabird'},
+    {k:'storm_petrel',n:'Storm petrel',   ltn:'Hydrobates pelagicus',   icon:'seabird'},
+  ]},
+  {k:'other', n:'Other marine life', icon:'other', species:[
+    {k:'grey_seal',     n:'Atlantic grey seal', ltn:'Halichoerus grypus', icon:'seal'},
+    {k:'harbour_seal',  n:'Harbour (common) seal',ltn:'Phoca vitulina',   icon:'seal'},
+    {k:'basking_shark', n:'Basking shark',      ltn:'Cetorhinus maximus', icon:'shark'},
+    {k:'sunfish',       n:'Ocean sunfish',      ltn:'Mola mola',          icon:'sunfish'},
+    {k:'leatherback',   n:'Leatherback turtle', ltn:'Dermochelys coriacea',icon:'turtle'},
+    {k:'jellyfish',     n:'Jellyfish',          ltn:'(various)',          icon:'jelly'},
+    {k:'other',         n:'Other / unidentified',ltn:'',                  icon:'other'},
+  ]},
+];
+const SP_INDEX={}; CATEGORIES.forEach(c=>c.species.forEach(s=>SP_INDEX[s.k]={...s,cat:c.k}));
+
+const FALMOUTH=[50.140,-5.060];
+let map,sb,selected=null,pickMode=false,marker=null,weather=null,picked=null,layer=L.layerGroup();
+
+/* ---- map ---- */
+function initMap(){
+  map=L.map('map',{zoomControl:true}).setView(FALMOUTH,12);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    {attribution:'&copy; OpenStreetMap &copy; CARTO',maxZoom:19}).addTo(map);
+  map.on('click',e=>{if(pickMode)setLocation(e.latlng.lat,e.latlng.lng);});
+}
+function armPick(){pickMode=!pickMode;const b=document.getElementById('pickbtn');
+  b.classList.toggle('armed',pickMode);b.textContent=pickMode?'Tap the map now…':'Tap map to drop a pin';}
+function useMyLocation(){
+  if(!navigator.geolocation){toast('Geolocation not available','err');return;}
+  navigator.geolocation.getCurrentPosition(
+    p=>setLocation(p.coords.latitude,p.coords.longitude),
+    ()=>toast('Could not get your location','err'),{enableHighAccuracy:true,timeout:8000});
+}
+function setLocation(lat,lng){
+  picked={lat:+lat.toFixed(5),lng:+lng.toFixed(5)};pickMode=false;
+  const b=document.getElementById('pickbtn');b.classList.remove('armed');b.textContent='Tap map to drop a pin';
+  document.getElementById('coords').textContent=`${picked.lat}, ${picked.lng}`;
+  if(marker)marker.remove();
+  marker=L.circleMarker([lat,lng],{radius:9,color:'#e8743b',fillColor:'#e8743b',fillOpacity:.9,weight:2}).addTo(map);
+  map.panTo([lat,lng]);fetchWeather(lat,lng);
+}
+
+/* ---- weather ---- */
+async function fetchWeather(lat,lng){
+  const wx=document.getElementById('wx');
+  wx.innerHTML='<div class="row" style="opacity:.6">Fetching conditions…</div>';
+  try{
+    const u=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}`
+      +`&current=temperature_2m,wind_speed_10m,wind_direction_10m,weather_code,cloud_cover,pressure_msl`
+      +`&wind_speed_unit=kn&timezone=auto`;
+    const d=await (await fetch(u)).json();const c=d.current;
+    weather={temp_c:c.temperature_2m,wind_kn:c.wind_speed_10m,wind_dir:c.wind_direction_10m,
+      cloud_pct:c.cloud_cover,pressure_hpa:c.pressure_msl,code:c.weather_code,desc:wxDesc(c.weather_code)};
+    wx.innerHTML=`<div class="ttl">${weather.desc}</div>`
+      +row('Air temp',`${weather.temp_c} °C`)
+      +row('Wind',`${weather.wind_kn} kn ${compass(weather.wind_dir)}`)
+      +row('Cloud',`${weather.cloud_pct}%`)
+      +row('Pressure',`${Math.round(weather.pressure_hpa)} hPa`);
+  }catch(e){wx.innerHTML='<div class="row err">Weather unavailable</div>';weather=null;}
+}
+const row=(l,v)=>`<div class="row"><span>${l}</span><b>${v}</b></div>`;
+function compass(d){const a=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];return a[Math.round(d/22.5)%16];}
+function wxDesc(c){const m={0:'Clear sky',1:'Mainly clear',2:'Partly cloudy',3:'Overcast',45:'Fog',48:'Rime fog',51:'Light drizzle',53:'Drizzle',55:'Heavy drizzle',61:'Light rain',63:'Rain',65:'Heavy rain',71:'Light snow',80:'Rain showers',81:'Showers',82:'Heavy showers',95:'Thunderstorm'};return m[c]||'Conditions';}
+
+/* ---- two-level picker ---- */
+function buildCategories(){
+  const p=document.getElementById('picker');
+  p.innerHTML='<div class="cat-grid">'+CATEGORIES.map(c=>
+    `<div class="cat" onclick="openCat('${c.k}')">${ICON[c.icon]}<span>${c.n}</span></div>`).join('')+'</div>';
+}
+function thumb(s){
+  // photo if present, else fall back to the embedded line icon
+  return `<img class="thumb" src="img/${s.k}.jpg" alt=""
+    onerror="this.outerHTML='<span class=\\'thumb-svg\\'>'+ICON['${s.icon}']+'</span>'">`;
+}
+function openCat(ck){
+  const c=CATEGORIES.find(x=>x.k===ck);const p=document.getElementById('picker');
+  p.innerHTML=`<div class="back" onclick="buildCategories()">‹ All groups</div>
+    <div class="sp-wrap">`+c.species.map(s=>
+      `<div class="sp-row${selected===s.k?' active':''}" onclick="pickSpecies('${s.k}')">
+        ${thumb(s)}<span class="nm">${s.n}</span>${s.ltn?`<span class="ltn">${s.ltn}</span>`:''}
+      </div>`).join('')+'</div>';
+}
+function pickSpecies(k){
+  selected=k;openCat(SP_INDEX[k].cat);
+}
+
+/* ---- supabase ---- */
+function connect(url,key){sb=supabase.createClient(url,key);
+  document.getElementById('setup').style.display='none';loadSightings();}
+function saveKeys(){
+  const url=document.getElementById('su-url').value.trim(),key=document.getElementById('su-key').value.trim();
+  if(!url||!key){toast('Both values needed','err');return;}
+  localStorage.setItem('fb_url',url);localStorage.setItem('fb_key',key);connect(url,key);
+}
+async function loadSightings(){
+  if(!sb)return;
+  const {data,error}=await sb.from('sightings').select('*').order('created_at',{ascending:false});
+  if(error){toast('Load failed: '+error.message,'err');return;}
+  renderSightings(data||[]);
+}
+function renderSightings(rows){
+  layer.clearLayers();const species=new Set();
+  rows.forEach(s=>{
+    species.add(s.species);
+    const meta=SP_INDEX[s.species]||{n:s.species,icon:'other'};
+    const icon=L.divIcon({className:'marker-ico',html:ICON[meta.icon],iconSize:[30,30],iconAnchor:[15,15]});
+    const w=s.weather||{};
+    const pic=`<img src="img/${s.species}.jpg" alt="" style="width:100%;height:90px;object-fit:cover;border-radius:8px;margin-bottom:7px" onerror="this.style.display='none'">`;
+    L.marker([s.lat,s.lng],{icon}).bindPopup(`<div class="pop">
+      ${pic}<div class="sp-name">${ICON[meta.icon]} ${meta.n}${s.count>1?' ×'+s.count:''}</div>
+      <div class="meta">${fmtDate(s.created_at)}${s.observer?' · '+esc(s.observer):''}<br>
+      ${w.desc?`${esc(w.desc)}, ${w.temp_c}°C, wind ${w.wind_kn}kn ${w.wind_dir!=null?compass(w.wind_dir):''}`:''}</div>
+      ${s.notes?`<div class="note">"${esc(s.notes)}"</div>`:''}</div>`).addTo(layer);
+  });
+  layer.addTo(map);
+  document.getElementById('stat-total').textContent=rows.length;
+  document.getElementById('stat-species').textContent=species.size;
+  document.getElementById('stat-yours').textContent=+(localStorage.getItem('fb_count')||0);
+}
+async function submitSighting(){
+  if(!selected){toast('Pick a species first','err');return;}
+  if(!picked){toast('Set a location first','err');return;}
+  if(!sb){document.getElementById('setup').style.display='flex';return;}
+  const btn=document.getElementById('submit');btn.disabled=true;btn.textContent='Saving…';
+  const record={species:selected,count:+document.getElementById('count').value||1,
+    lat:picked.lat,lng:picked.lng,notes:document.getElementById('notes').value.trim()||null,
+    observer:document.getElementById('observer').value.trim()||null,weather:weather};
+  const {error}=await sb.from('sightings').insert(record);
+  btn.disabled=false;btn.textContent='Log sighting';
+  if(error){toast('Save failed: '+error.message,'err');return;}
+  localStorage.setItem('fb_count',(+(localStorage.getItem('fb_count')||0)+1));
+  toast('Sighting logged');
+  selected=null;buildCategories();
+  document.getElementById('notes').value='';document.getElementById('count').value=1;
+  if(marker){marker.remove();marker=null;}picked=null;
+  document.getElementById('coords').textContent='No location set';
+  document.getElementById('wx').innerHTML='<div class="row" style="opacity:.6">Set a location to auto-fetch conditions…</div>';
+  weather=null;loadSightings();
+}
+
+/* ---- helpers ---- */
+function fmtDate(s){const d=new Date(s);return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});}
+function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function toast(msg,kind){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show'+(kind==='err'?' err':'');setTimeout(()=>t.className='toast',2600);}
+
+/* ---- boot ---- */
+initMap();buildCategories();
+const url=CONFIG.SUPABASE_URL||localStorage.getItem('fb_url');
+const key=CONFIG.SUPABASE_KEY||localStorage.getItem('fb_key');
+if(url&&key){connect(url,key);}else{document.getElementById('setup').style.display='flex';}
+</script>
+</body>
+</html>
