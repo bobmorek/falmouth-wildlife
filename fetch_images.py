@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 fetch_images.py  —  Falmouth Bay Wildlife Log
-Downloads a freely-licensed photo for each species from Wikipedia,
-resizes to a small square thumbnail, and writes credits.
+Downloads a freely-licensed photo for each species, resizes to a small
+square thumbnail, and writes credits. Sources are tried in order until
+one yields an image: Wikipedia → iNaturalist → GBIF.
 
 USAGE:
     pip install pillow requests
@@ -66,23 +67,85 @@ def summary(title):
     r.raise_for_status()
     return r.json()
 
-def find_image(names):
-    """Try each candidate page title in turn; return (title, summary, src) for
-    the first one that yields an image. Raises if none do."""
-    last_err = None
-    for title in names:
+# ── Image sources ──────────────────────────────────────────────────────────
+# Each source takes (common, binomial) and returns a record dict:
+#   {src, lic, artist, page, source, via}
+# where `src` is a downloadable image URL and `via` names the alternate title
+# that matched (or None when the common name matched). Raises if nothing found.
+
+def from_wikipedia(common, binomial):
+    """Wikipedia REST summary — common name first, Latin binomial as fallback."""
+    for title in (common, binomial):
         if not title:
             continue
         try:
             d = summary(title)
             src = (d.get("originalimage") or d.get("thumbnail") or {}).get("source")
             if src:
-                return title, d, src
-            last_err = RuntimeError("no image in summary")
+                lic, artist = image_credit(src)
+                page = d.get("content_urls", {}).get("desktop", {}).get("page", "")
+                return {"src": src, "lic": lic, "artist": artist, "page": page,
+                        "source": "Wikipedia", "via": None if title == common else title}
+        except Exception:
+            pass
+        time.sleep(0.2)  # be polite between candidate lookups
+    raise RuntimeError("Wikipedia: no image")
+
+def from_inaturalist(common, binomial):
+    """iNaturalist taxon default photo — excellent wildlife coverage.
+    Only accepts CC-licensed photos (license_code set); skips all-rights-reserved."""
+    for q in (binomial, common):
+        if not q:
+            continue
+        try:
+            r = S.get("https://api.inaturalist.org/v1/taxa",
+                      params={"q": q, "rank": "species,genus", "per_page": 5}, timeout=25)
+            for t in r.json().get("results", []):
+                photo = t.get("default_photo") or {}
+                src = photo.get("medium_url") or photo.get("url")
+                if src and photo.get("license_code"):  # license_code None == all rights reserved
+                    page = f"https://www.inaturalist.org/taxa/{t.get('id')}"
+                    return {"src": src, "lic": photo["license_code"].upper(),
+                            "artist": photo.get("attribution", "(unknown)"), "page": page,
+                            "source": "iNaturalist", "via": None if q == common else q}
+        except Exception:
+            pass
+        time.sleep(0.2)
+    raise RuntimeError("iNaturalist: no CC photo")
+
+def from_gbif(common, binomial):
+    """GBIF occurrence media — last-resort aggregator across natural-history sources."""
+    name = binomial or common
+    if not name:
+        raise RuntimeError("GBIF: no name")
+    key = S.get("https://api.gbif.org/v1/species/match",
+                params={"name": name}, timeout=25).json().get("usageKey")
+    if not key:
+        raise RuntimeError("GBIF: no taxon match")
+    r = S.get("https://api.gbif.org/v1/occurrence/search",
+              params={"taxonKey": key, "mediaType": "StillImage", "limit": 20}, timeout=25)
+    for occ in r.json().get("results", []):
+        for media in occ.get("media", []):
+            src = media.get("identifier")
+            if src:
+                page = f"https://www.gbif.org/occurrence/{occ.get('key')}"
+                return {"src": src, "lic": media.get("license", "(see source)"),
+                        "artist": media.get("rightsHolder") or media.get("creator") or "(unknown)",
+                        "page": page, "source": "GBIF",
+                        "via": None if name == common else name}
+    raise RuntimeError("GBIF: no media")
+
+SOURCES = (from_wikipedia, from_inaturalist, from_gbif)
+
+def find_image(common, binomial):
+    """Try each source in order; return the first record that yields an image."""
+    last_err = None
+    for source in SOURCES:
+        try:
+            return source(common, binomial)
         except Exception as e:
             last_err = e
-        time.sleep(0.2)  # be polite between candidate lookups
-    raise last_err or RuntimeError("no candidate titles")
+    raise last_err or RuntimeError("no sources configured")
 
 def image_credit(img_url):
     """Look up licence + author for a Commons file via the MediaWiki API."""
@@ -114,26 +177,24 @@ def square(data):
 def main():
     os.makedirs("img", exist_ok=True)
     credits = ["# Image credits\n",
-               "Species photos sourced from Wikipedia / Wikimedia Commons under the licences noted. ",
-               "Each remains the property of its author.\n"]
+               "Species photos sourced from Wikipedia / Wikimedia Commons, iNaturalist and GBIF ",
+               "under the licences noted. Each remains the property of its author.\n"]
     ok = fail = 0
     for key, names in SPECIES.items():
-        names = (names,) if isinstance(names, str) else tuple(names)
-        common = names[0]
+        common, binomial = (names, None) if isinstance(names, str) else (names[0], names[1])
         try:
-            title, d, src = find_image(names)
-            raw = S.get(src, timeout=30).content
+            rec = find_image(common, binomial)
+            raw = S.get(rec["src"], timeout=30).content
             open(f"img/{key}.jpg","wb").write(square(raw))
-            lic, artist = image_credit(src)
-            page = d.get("content_urls",{}).get("desktop",{}).get("page","")
-            via = "" if title == common else f" (via {title})"
-            credits.append(f"- **{common}** (`{key}.jpg`): {artist}, {lic}. {page}")
-            print(f"  ok   {key:22s} {common}{via}")
+            via = "" if not rec["via"] else f" (via {rec['via']})"
+            credits.append(f"- **{common}** (`{key}.jpg`): {rec['artist']}, {rec['lic']}. "
+                           f"Source: {rec['source']}. {rec['page']}")
+            print(f"  ok   {key:22s} {common}  [{rec['source']}]{via}")
             ok += 1
         except Exception as e:
             print(f"  FAIL {key:22s} {common}  — {e}  (app will use line icon)")
             fail += 1
-        time.sleep(0.4)  # be polite to the API
+        time.sleep(0.4)  # be polite to the APIs
     open("CREDITS.md","w").write("\n".join(credits)+"\n")
     print(f"\nDone: {ok} downloaded, {fail} fell back to line icons.")
     print("Drop the img/ folder and CREDITS.md next to index.html, then push to GitHub.")
