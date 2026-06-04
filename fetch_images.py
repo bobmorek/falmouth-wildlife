@@ -211,7 +211,7 @@ def main():
             print(f"  FAIL {key:22s} {common}  — {e}  (app will use line icon)")
             fail += 1
         time.sleep(0.4)  # be polite to the APIs
-    open("CREDITS.md","w").write("\n".join(credits)+"\n")
+    open("CREDITS.md","w",encoding="utf-8").write("\n".join(credits)+"\n")
     print(f"\nDone: {ok} downloaded, {fail} fell back to line icons.")
     print("Drop the img/ folder and CREDITS.md next to index.html, then push to GitHub.")
 
