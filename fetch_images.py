@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """
 fetch_images.py  —  Falmouth Bay Wildlife Log
-Downloads a freely-licensed photo for each species from Wikipedia,
-resizes to a small square thumbnail, and writes credits.
+Downloads a photo for each species, resizes to a small square thumbnail,
+and writes credits.
+
+Sources, in order of preference:
+  1. Wikipedia / Wikimedia Commons  — freely licensed, safe to republish.
+  2. whaletrail.org/spotters-guide  — fallback for species Wikimedia misses.
+     NOTE: WhaleTrail images are COPYRIGHTED (all rights reserved). They are
+     only used here because the project owner has opted in / arranged use.
+     Set USE_WHALETRAIL = False to disable this fallback entirely.
 
 USAGE:
     pip install pillow requests
@@ -10,18 +17,37 @@ USAGE:
 
 Output:
     img/<species_key>.jpg     (square thumbnails, ~160px)
-    CREDITS.md                (licence + author per image)
+    CREDITS.md                (source + licence per image)
 
 Drop the img/ folder and CREDITS.md into your repo next to index.html.
 Re-run any time; it overwrites. If a species fails, the app falls back
 to its built-in line icon automatically, so partial runs are fine.
+
+Some hosts (incl. whaletrail.org) block non-browser clients; this script
+presents a normal browser User-Agent for them. Run it from a machine with
+open internet — sandboxed/allowlisted environments may 403.
 """
-import os, json, time, io
+import os, json, time, io, re
 import requests
+from html.parser import HTMLParser
+from urllib.parse import urljoin
 from PIL import Image, ImageOps
 
 UA = "FalmouthWildlifeLog/1.0 (community wildlife recording project)"
+# Some sites refuse non-browser agents, so present a normal browser UA to them.
+BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 THUMB = 160  # output square size in px
+
+# whaletrail.org fallback ----------------------------------------------------
+USE_WHALETRAIL = True
+WHALETRAIL_URL = "https://whaletrail.org/spotters-guide"
+# Manual overrides: species_key -> the exact label as it appears on whaletrail
+# (only needed when their wording differs from our common name).
+WHALETRAIL_ALIASES = {
+    # "orca": "Killer Whale",
+    # "harbour_porpoise": "Harbour Porpoise",
+}
 
 # species_key : (common name, scientific binomial)
 # Both are looked up in order — the common-name page first, then the Latin
@@ -84,6 +110,61 @@ def find_image(names):
         time.sleep(0.2)  # be polite between candidate lookups
     raise last_err or RuntimeError("no candidate titles")
 
+def _norm(s):
+    """Lowercase and collapse to single-spaced alphanumerics for matching."""
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+_WT_INDEX = None
+def whaletrail_index():
+    """Scrape whaletrail.org/spotters-guide once into {normalised label: url}.
+    Cached for the run. Returns {} if the page can't be fetched."""
+    global _WT_INDEX
+    if _WT_INDEX is not None:
+        return _WT_INDEX
+    idx, pairs = {}, []
+    try:
+        r = S.get(WHALETRAIL_URL, headers={"User-Agent": BROWSER_UA}, timeout=30)
+        r.raise_for_status()
+
+        class _Imgs(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                if tag != "img":
+                    return
+                a = dict(attrs)
+                src = a.get("src") or a.get("data-src") or a.get("data-lazy-src") or ""
+                label = a.get("alt") or a.get("title") or ""
+                if src and not src.startswith("data:"):
+                    pairs.append((label, urljoin(WHALETRAIL_URL, src)))
+
+        _Imgs().feed(r.text)
+        for label, url in pairs:
+            k = _norm(label)
+            if k and k not in idx:
+                idx[k] = url
+        print(f"  (whaletrail: indexed {len(idx)} labelled images)")
+    except Exception as e:
+        print(f"  (whaletrail index unavailable: {e})")
+    _WT_INDEX = idx
+    return idx
+
+def whaletrail_image(key, common):
+    """Best-effort match of a species to a whaletrail image URL, or None."""
+    idx = whaletrail_index()
+    if not idx:
+        return None
+    wanted = _norm(WHALETRAIL_ALIASES.get(key, common))
+    if wanted in idx:
+        return idx[wanted]
+    # otherwise, accept a label that contains all the significant words
+    words = [w for w in wanted.split() if len(w) > 2]
+    best = None
+    for label, url in idx.items():
+        toks = label.split()
+        if words and all(w in toks for w in words):
+            if best is None or len(label) < len(best[0]):  # prefer most specific
+                best = (label, url)
+    return best[1] if best else None
+
 def image_credit(img_url):
     """Look up licence + author for a Commons file via the MediaWiki API."""
     fname = img_url.split("/")[-1]
@@ -117,9 +198,12 @@ def main():
                "Species photos sourced from Wikipedia / Wikimedia Commons under the licences noted. ",
                "Each remains the property of its author.\n"]
     ok = fail = 0
+    used_wt = False
     for key, names in SPECIES.items():
         names = (names,) if isinstance(names, str) else tuple(names)
         common = names[0]
+        err = None
+        # 1) Wikimedia (freely licensed) -------------------------------------
         try:
             title, d, src = find_image(names)
             raw = S.get(src, timeout=30).content
@@ -131,9 +215,29 @@ def main():
             print(f"  ok   {key:22s} {common}{via}")
             ok += 1
         except Exception as e:
-            print(f"  FAIL {key:22s} {common}  — {e}  (app will use line icon)")
+            err = e
+        # 2) whaletrail.org fallback (COPYRIGHTED — owner opted in) -----------
+        if err is not None and USE_WHALETRAIL:
+            try:
+                wsrc = whaletrail_image(key, common)
+                if not wsrc:
+                    raise RuntimeError("no whaletrail match")
+                raw = S.get(wsrc, headers={"User-Agent": BROWSER_UA}, timeout=30).content
+                open(f"img/{key}.jpg","wb").write(square(raw))
+                credits.append(f"- **{common}** (`{key}.jpg`): illustration "
+                               f"© WhaleTrail.org, all rights reserved — "
+                               f"used by arrangement. {WHALETRAIL_URL}")
+                print(f"  ok   {key:22s} {common} (via whaletrail.org)")
+                ok += 1; used_wt = True; err = None
+            except Exception as e:
+                err = e
+        if err is not None:
+            print(f"  FAIL {key:22s} {common}  — {err}  (app will use line icon)")
             fail += 1
         time.sleep(0.4)  # be polite to the API
+    if used_wt:
+        credits.append("\n> Images marked *WhaleTrail.org* are copyrighted "
+                       "(all rights reserved) and are NOT freely licensed.")
     open("CREDITS.md","w").write("\n".join(credits)+"\n")
     print(f"\nDone: {ok} downloaded, {fail} fell back to line icons.")
     print("Drop the img/ folder and CREDITS.md next to index.html, then push to GitHub.")
