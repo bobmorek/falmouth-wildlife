@@ -23,35 +23,37 @@ from PIL import Image, ImageOps
 UA = "FalmouthWildlifeLog/1.0 (community wildlife recording project)"
 THUMB = 160  # output square size in px
 
-# species_key : Wikipedia page title (Latin binomial is most reliable)
+# species_key : (common name, scientific binomial)
+# Both are looked up in order — the common-name page first, then the Latin
+# binomial as a fallback — so a miss or a redirect on one still finds a photo.
 SPECIES = {
-    "common_dolphin":     "Common dolphin",
-    "bottlenose_dolphin": "Common bottlenose dolphin",
-    "rissos_dolphin":     "Risso's dolphin",
-    "striped_dolphin":    "Striped dolphin",
-    "white_sided_dolphin":"Atlantic white-sided dolphin",
-    "harbour_porpoise":   "Harbour porpoise",
-    "minke_whale":        "Common minke whale",
-    "humpback_whale":     "Humpback whale",
-    "fin_whale":          "Fin whale",
-    "pilot_whale":        "Long-finned pilot whale",
-    "orca":               "Orca",
-    "gannet":             "Northern gannet",
-    "shag":               "European shag",
-    "cormorant":          "Great cormorant",
-    "fulmar":             "Northern fulmar",
-    "kittiwake":          "Black-legged kittiwake",
-    "razorbill":          "Razorbill",
-    "guillemot":          "Common murre",
-    "puffin":             "Atlantic puffin",
-    "manx_shearwater":    "Manx shearwater",
-    "storm_petrel":       "European storm petrel",
-    "grey_seal":          "Grey seal",
-    "harbour_seal":       "Harbor seal",
-    "basking_shark":      "Basking shark",
-    "sunfish":            "Ocean sunfish",
-    "leatherback":        "Leatherback sea turtle",
-    "jellyfish":          "Jellyfish",
+    "common_dolphin":     ("Common dolphin",                "Delphinus delphis"),
+    "bottlenose_dolphin": ("Common bottlenose dolphin",     "Tursiops truncatus"),
+    "rissos_dolphin":     ("Risso's dolphin",               "Grampus griseus"),
+    "striped_dolphin":    ("Striped dolphin",               "Stenella coeruleoalba"),
+    "white_sided_dolphin":("Atlantic white-sided dolphin",  "Lagenorhynchus acutus"),
+    "harbour_porpoise":   ("Harbour porpoise",              "Phocoena phocoena"),
+    "minke_whale":        ("Common minke whale",            "Balaenoptera acutorostrata"),
+    "humpback_whale":     ("Humpback whale",                "Megaptera novaeangliae"),
+    "fin_whale":          ("Fin whale",                     "Balaenoptera physalus"),
+    "pilot_whale":        ("Long-finned pilot whale",       "Globicephala melas"),
+    "orca":               ("Orca",                          "Orcinus orca"),
+    "gannet":             ("Northern gannet",               "Morus bassanus"),
+    "shag":               ("European shag",                 "Gulosus aristotelis"),
+    "cormorant":          ("Great cormorant",               "Phalacrocorax carbo"),
+    "fulmar":             ("Northern fulmar",               "Fulmarus glacialis"),
+    "kittiwake":          ("Black-legged kittiwake",        "Rissa tridactyla"),
+    "razorbill":          ("Razorbill",                     "Alca torda"),
+    "guillemot":          ("Common murre",                  "Uria aalge"),
+    "puffin":             ("Atlantic puffin",               "Fratercula arctica"),
+    "manx_shearwater":    ("Manx shearwater",               "Puffinus puffinus"),
+    "storm_petrel":       ("European storm petrel",         "Hydrobates pelagicus"),
+    "grey_seal":          ("Grey seal",                     "Halichoerus grypus"),
+    "harbour_seal":       ("Harbor seal",                   "Phoca vitulina"),
+    "basking_shark":      ("Basking shark",                 "Cetorhinus maximus"),
+    "sunfish":            ("Ocean sunfish",                 "Mola mola"),
+    "leatherback":        ("Leatherback sea turtle",        "Dermochelys coriacea"),
+    "jellyfish":          ("Jellyfish",                     None),
     # "other" intentionally omitted — uses line icon
 }
 
@@ -63,6 +65,24 @@ def summary(title):
     r = S.get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{title.replace(' ','_')}", timeout=25)
     r.raise_for_status()
     return r.json()
+
+def find_image(names):
+    """Try each candidate page title in turn; return (title, summary, src) for
+    the first one that yields an image. Raises if none do."""
+    last_err = None
+    for title in names:
+        if not title:
+            continue
+        try:
+            d = summary(title)
+            src = (d.get("originalimage") or d.get("thumbnail") or {}).get("source")
+            if src:
+                return title, d, src
+            last_err = RuntimeError("no image in summary")
+        except Exception as e:
+            last_err = e
+        time.sleep(0.2)  # be polite between candidate lookups
+    raise last_err or RuntimeError("no candidate titles")
 
 def image_credit(img_url):
     """Look up licence + author for a Commons file via the MediaWiki API."""
@@ -97,21 +117,21 @@ def main():
                "Species photos sourced from Wikipedia / Wikimedia Commons under the licences noted. ",
                "Each remains the property of its author.\n"]
     ok = fail = 0
-    for key, title in SPECIES.items():
+    for key, names in SPECIES.items():
+        names = (names,) if isinstance(names, str) else tuple(names)
+        common = names[0]
         try:
-            d = summary(title)
-            src = (d.get("originalimage") or d.get("thumbnail") or {}).get("source")
-            if not src:
-                raise RuntimeError("no image in summary")
+            title, d, src = find_image(names)
             raw = S.get(src, timeout=30).content
             open(f"img/{key}.jpg","wb").write(square(raw))
             lic, artist = image_credit(src)
             page = d.get("content_urls",{}).get("desktop",{}).get("page","")
-            credits.append(f"- **{title}** (`{key}.jpg`): {artist}, {lic}. {page}")
-            print(f"  ok   {key:22s} {title}")
+            via = "" if title == common else f" (via {title})"
+            credits.append(f"- **{common}** (`{key}.jpg`): {artist}, {lic}. {page}")
+            print(f"  ok   {key:22s} {common}{via}")
             ok += 1
         except Exception as e:
-            print(f"  FAIL {key:22s} {title}  — {e}  (app will use line icon)")
+            print(f"  FAIL {key:22s} {common}  — {e}  (app will use line icon)")
             fail += 1
         time.sleep(0.4)  # be polite to the API
     open("CREDITS.md","w").write("\n".join(credits)+"\n")
