@@ -84,6 +84,7 @@ Share that link — visitors land straight on the map and form, no warnings, no 
 
 - **Species photos:** run `fetch_images.py` on your own machine once (`pip install pillow requests` then `python3 fetch_images.py`). It downloads a freely-licensed photo per species into an `img/` folder, resizes them to small thumbnails, and writes `CREDITS.md`. Drop `img/` and `CREDITS.md` into the repo next to `index.html`. Any species without a photo automatically shows a built-in line icon, so the app works with or without the folder.
 - **Weather** comes from Open-Meteo, which needs no API key.
+- **Nautical chart & depths:** a layer switcher (top-right of the map) toggles between Dark, Nautical chart, and Street base maps, with an OpenSeaMap "Sea marks & depths" overlay on top showing buoys, lights, depth contours and soundings. These tiles are free and credited automatically in the map's attribution (OpenSeaMap, CC-BY-SA). Note OpenSeaMap depth detail is best inshore and at higher zoom; it is not a substitute for an official Admiralty chart for navigation.
 - **Cost:** Supabase free tier and GitHub Pages comfortably cover a community project like this.
 - **Spam protection (optional):** if abuse ever becomes an issue, add Cloudflare Turnstile to the form, or restrict inserts with a lightweight Supabase Edge Function. Not needed to start.
 - **Custom domain:** GitHub Pages supports custom domains under Settings → Pages if you ever want `wildlife.something.co.uk`.
