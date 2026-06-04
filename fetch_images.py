@@ -27,18 +27,23 @@ THUMB = 160  # output square size in px
 # species_key : (common name, scientific binomial)
 # Both are looked up in order — the common-name page first, then the Latin
 # binomial as a fallback — so a miss or a redirect on one still finds a photo.
+# Keys mirror the CATEGORIES list in index.html; the icon-only catch-all keys
+# (jellyfish_other, other) are intentionally omitted — they use a line icon.
 SPECIES = {
+    # Dolphins & porpoise
     "common_dolphin":     ("Common dolphin",                "Delphinus delphis"),
     "bottlenose_dolphin": ("Common bottlenose dolphin",     "Tursiops truncatus"),
     "rissos_dolphin":     ("Risso's dolphin",               "Grampus griseus"),
     "striped_dolphin":    ("Striped dolphin",               "Stenella coeruleoalba"),
     "white_sided_dolphin":("Atlantic white-sided dolphin",  "Lagenorhynchus acutus"),
     "harbour_porpoise":   ("Harbour porpoise",              "Phocoena phocoena"),
+    # Whales
     "minke_whale":        ("Common minke whale",            "Balaenoptera acutorostrata"),
     "humpback_whale":     ("Humpback whale",                "Megaptera novaeangliae"),
     "fin_whale":          ("Fin whale",                     "Balaenoptera physalus"),
     "pilot_whale":        ("Long-finned pilot whale",       "Globicephala melas"),
     "orca":               ("Orca",                          "Orcinus orca"),
+    # Seabirds
     "gannet":             ("Northern gannet",               "Morus bassanus"),
     "shag":               ("European shag",                 "Gulosus aristotelis"),
     "cormorant":          ("Great cormorant",               "Phalacrocorax carbo"),
@@ -49,13 +54,24 @@ SPECIES = {
     "puffin":             ("Atlantic puffin",               "Fratercula arctica"),
     "manx_shearwater":    ("Manx shearwater",               "Puffinus puffinus"),
     "storm_petrel":       ("European storm petrel",         "Hydrobates pelagicus"),
+    # Jellyfish
+    "barrel_jellyfish":   ("Barrel jellyfish",              "Rhizostoma pulmo"),
+    "moon_jellyfish":     ("Moon jellyfish",                "Aurelia aurita"),
+    "compass_jellyfish":  ("Compass jellyfish",             "Chrysaora hysoscella"),
+    "blue_jellyfish":     ("Blue jellyfish",                "Cyanea lamarckii"),
+    "lions_mane_jellyfish":("Lion's mane jellyfish",        "Cyanea capillata"),
+    "mauve_stinger":      ("Mauve stinger",                 "Pelagia noctiluca"),
+    # Octopus & squid
+    "common_octopus":     ("Common octopus",                "Octopus vulgaris"),
+    "curled_octopus":     ("Curled octopus",                "Eledone cirrhosa"),
+    "cuttlefish":         ("Common cuttlefish",             "Sepia officinalis"),
+    "squid":              ("Squid",                         "Loligo forbesii"),
+    # Other marine life
     "grey_seal":          ("Grey seal",                     "Halichoerus grypus"),
     "harbour_seal":       ("Harbor seal",                   "Phoca vitulina"),
     "basking_shark":      ("Basking shark",                 "Cetorhinus maximus"),
     "sunfish":            ("Ocean sunfish",                 "Mola mola"),
     "leatherback":        ("Leatherback sea turtle",        "Dermochelys coriacea"),
-    "jellyfish":          ("Jellyfish",                     None),
-    # "other" intentionally omitted — uses line icon
 }
 
 S = requests.Session()
